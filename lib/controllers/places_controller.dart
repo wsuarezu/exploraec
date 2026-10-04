@@ -1,34 +1,49 @@
+import 'package:geolocator/geolocator.dart';
 import 'package:get/get.dart';
 
 import '../models/place.dart';
+import '../services/location_service.dart';
 
 enum EstadoCarga { cargando, exito, error }
 
-/// Fuente única de verdad de los lugares — Sesión 4. Antes de esta sesión el
-/// estado de la lista (su `Future`, las banderas de simulación y el
-/// `setState`) vivía atrapado dentro de `HomeScreen`, y la pantalla se
-/// enteraba de un lugar nuevo solo recargando a mano al volver del
-/// formulario. Ahora vive aquí, registrado una sola vez por
-/// `PlacesBinding` y obtenido con `Get.find()` (vía `GetView`, ver
-/// `HomeScreen`): cualquier pantalla futura lo lee sin repetir esa carga.
+/// Fuente única de verdad de los lugares y de la posición del usuario —
+/// Sesiones 4 y 5. La lista (`lugares`) y su estado de carga nacieron en la
+/// Sesión 4 para `HomeScreen`; desde la Sesión 5 el controller también
+/// guarda la posición real (`posicion`, con su propio estado) para que el
+/// Mapa —y, en la Sesión 6, la consulta a la Overpass API— la lean sin
+/// pedirla de nuevo al sistema operativo.
 class PlacesController extends GetxController {
   final RxList<Place> lugares = <Place>[].obs;
   final Rx<EstadoCarga> estado = EstadoCarga.cargando.obs;
   final RxString mensajeError = ''.obs;
+  final Rx<Position?> posicion = Rx<Position?>(null);
+  final Rx<EstadoCarga> estadoPosicion = EstadoCarga.cargando.obs;
+  final RxString mensajeErrorPosicion = ''.obs;
 
-  bool _modoDebugError = false;
-  bool _modoDebugVacio = false;
+  /// Estado derivado (Sesión 4, Paso 5): se calcula a partir de `lugares`.
+  int get total => lugares.length;
 
-  @override
-  void onInit() {
-    super.onInit();
+  /// Worker (Sesión 4, Paso 5): reacciona a cada cambio de `estado`.
+  void _observarErrores() {
     ever(estado, (EstadoCarga e) {
       if (e == EstadoCarga.error) {
         Get.snackbar('Error', mensajeError.value);
       }
     });
-    cargarLugares();
   }
+
+  bool _modoDebugError = false;
+  bool _modoDebugVacio = false;
+
+  @override
+  @override
+void onInit() {
+  _observarErrores();
+  ever(posicion, (_) => ordenarLugaresPorDistancia()); // nueva
+  super.onInit();
+  cargarLugares();
+  cargarPosicion();                                    // nueva
+}
 
   /// Simula uno de los 3 estados a propósito, solo para esta práctica —
   /// mismo recurso que `HomeScreen` traía desde la Sesión 3, ahora
@@ -41,26 +56,13 @@ class PlacesController extends GetxController {
 
   Future<void> cargarLugares() async {
     estado.value = EstadoCarga.cargando;
-
-    // TODO(sesion-04): borra las dos líneas de abajo y descomenta el bloque completo. (Paso 2 — conectar el controller a la carga de lugares)
-    // Por qué: las 2 líneas de abajo fuerzan éxito con una lista vacía,
-    // sin llamar a nada — el bloque try/catch real es exactamente la
-    // misma lógica que `HomeScreen._cargar()` tenía en la Sesión 3
-    // (llamar a `fetchLugaresSimulado` y traducir su resultado a los 3
-    // estados), ahora centralizada aquí para que cualquier pantalla la
-    // comparta en vez de cada una tener la suya. Se usa `assignAll` (y no
-    // `lugares.value = resultado`) porque copia los elementos:
-    // `fetchLugaresSimulado` devuelve la lista global `lugaresEjemplo`, y
-    // asignarla directo haría que `lugares` y `lugaresEjemplo` fueran la
-    // misma lista, con lo que `agregarLugar` duplicaría cada lugar nuevo.
-    // lugares.value = [];
-    // estado.value = EstadoCarga.exito;
     try {
       final resultado = await fetchLugaresSimulado(
         forzarError: _modoDebugError,
         forzarVacio: _modoDebugVacio,
       );
       lugares.assignAll(resultado);
+      ordenarLugaresPorDistancia();
       estado.value = EstadoCarga.exito;
     } catch (e) {
       mensajeError.value = '$e';
@@ -68,11 +70,31 @@ class PlacesController extends GetxController {
     }
   }
 
+  /// Pide la posición real al sistema operativo una sola vez y la deja en
+  /// [posicion]; si ya la tiene, no vuelve a pedirla salvo que se pida con
+  /// [forzar] (por ejemplo, desde el botón "Reintentar" del Mapa).
+  Future<void> cargarPosicion({bool forzar = false}) async {
+    if (posicion.value != null && !forzar) {
+      estadoPosicion.value = EstadoCarga.exito;
+      return;
+    }
+    estadoPosicion.value = EstadoCarga.cargando;
+    try {
+      posicion.value = await LocationService.obtenerPosicionActual();
+      estadoPosicion.value = EstadoCarga.exito;
+    } on LocationException catch (e) {
+      mensajeErrorPosicion.value = e.mensaje;
+      estadoPosicion.value = EstadoCarga.error;
+    } catch (e) {
+      mensajeErrorPosicion.value = '$e';
+      estadoPosicion.value = EstadoCarga.error;
+    }
+  }
+
   /// Agrega un lugar creado a mano (`AddPlaceScreen`) — en memoria
   /// únicamente hasta que la Sesión 7 lo persista con Hive. `lugares.add`
   /// (en vez de reconstruir toda la lista) ya notifica a cualquier `Obx`
-  /// que esté escuchando: Inicio se actualiza solo, sin el `_cargar()`
-  /// manual que la Sesión 3 hacía al volver del formulario.
+  /// que esté escuchando, en Inicio y en el Mapa a la vez.
   void agregarLugar(Place lugar) {
     lugaresEjemplo.add(lugar);
     lugares.add(lugar);
@@ -88,12 +110,6 @@ class PlacesController extends GetxController {
   /// Otro estado derivado: se calcula a partir de `favoritos`, no se guarda.
   int get totalFavoritos => favoritos.length;
 
-  // TODO(sesion-04): OPCIONAL — borra la línea de abajo y descomenta el bloque completo. (Paso 6A — favoritos en memoria)
-  // Por qué: el método vacío de abajo no hace nada, por eso el corazón de
-  // `PlaceCard` no cambia al tocarlo. La versión real agrega o quita el
-  // lugar de la lista reactiva `favoritos`: cualquier `Obx` que la lea (el
-  // ícono del corazón, el contador de la pestaña Favoritos) se actualiza solo.
-  // void alternarFavorito(Place lugar) {}
   void alternarFavorito(Place lugar) {
     if (esFavorito(lugar)) {
       favoritos.removeWhere((p) => p.id == lugar.id);
@@ -102,6 +118,15 @@ class PlacesController extends GetxController {
     }
   }
 
-  /// Estado derivado: se calcula a partir de `lugares`, no se guarda aparte.
-  int get total => lugares.length;
+  double? distanciaA(Place lugar) {
+    final pos = posicion.value;
+    return pos == null ? null : distanciaAPlaceEnMetros(pos, lugar);
+  }
+
+ void ordenarLugaresPorDistancia() {
+    final pos = posicion.value;
+    if (pos == null) return;
+    lugares.sort((a, b) => distanciaAPlaceEnMetros(pos, a).compareTo(distanciaAPlaceEnMetros(pos, b)));
+  }
+
 }
