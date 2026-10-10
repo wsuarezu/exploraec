@@ -36,14 +36,11 @@ class PlacesController extends GetxController {
   bool _modoDebugVacio = false;
 
   @override
-  @override
-void onInit() {
-  _observarErrores();
-  ever(posicion, (_) => ordenarLugaresPorDistancia()); // nueva
-  super.onInit();
-  cargarLugares();
-  cargarPosicion();                                    // nueva
-}
+  void onInit() {
+    _observarErrores();
+    super.onInit();
+    cargarLugares();
+  }
 
   /// Simula uno de los 3 estados a propósito, solo para esta práctica —
   /// mismo recurso que `HomeScreen` traía desde la Sesión 3, ahora
@@ -62,7 +59,6 @@ void onInit() {
         forzarVacio: _modoDebugVacio,
       );
       lugares.assignAll(resultado);
-      ordenarLugaresPorDistancia();
       estado.value = EstadoCarga.exito;
     } catch (e) {
       mensajeError.value = '$e';
@@ -122,11 +118,4 @@ void onInit() {
     final pos = posicion.value;
     return pos == null ? null : distanciaAPlaceEnMetros(pos, lugar);
   }
-
- void ordenarLugaresPorDistancia() {
-    final pos = posicion.value;
-    if (pos == null) return;
-    lugares.sort((a, b) => distanciaAPlaceEnMetros(pos, a).compareTo(distanciaAPlaceEnMetros(pos, b)));
-  }
-
 }
