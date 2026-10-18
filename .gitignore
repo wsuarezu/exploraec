@@ -55,3 +55,6 @@ app.*.map.json
 .env
 .env.*
 !.env.example
+
+.claude/settings.local.json
+CLAUDE.local.md
