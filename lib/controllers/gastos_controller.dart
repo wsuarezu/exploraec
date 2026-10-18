@@ -26,10 +26,26 @@ class GastosController extends GetxController {
   /// Categorías que define el backend (`GET /gastos/categorias`).
   final RxList<String> categorias = <String>[].obs;
 
+  /// Categoría elegida en los chips de la pantalla. Vacío = «Todas».
+  final RxString categoriaFiltro = ''.obs;
+
   /// `true` solo cuando la última carga exitosa vino de la caché local (el
   /// servidor no respondió): la UI lo usa para avisar «datos guardados».
   final RxBool desdeCache = false.obs;
   String get ultimaSincronizacion => _repository.ultimaSincronizacion;
+
+  /// Las categorías que de verdad aparecen en los gastos cargados, en orden
+  /// alfabético. No se usan las del backend (`categorias`) porque los chips
+  /// solo deben ofrecer lo que la persona puede llegar a ver.
+  List<String> get categoriasDeLosGastos =>
+      gastos.map((g) => g.categoria).toSet().toList()..sort();
+
+  /// Los gastos que se muestran según el chip elegido.
+  List<Gasto> get gastosVisibles => categoriaFiltro.value.isEmpty
+      ? gastos
+      : gastos.where((g) => g.categoria == categoriaFiltro.value).toList();
+
+  void filtrarPor(String categoria) => categoriaFiltro.value = categoria;
 
   @override
   void onInit() {
@@ -74,6 +90,12 @@ class GastosController extends GetxController {
     gastos.value = lista;
     totalEnServidor.value = lista.length;
     desdeCache.value = cache;
+    // Por qué: si se borró el último gasto de la categoría filtrada, ese chip
+    // ya no existe; sin esto la pantalla se quedaría vacía sin motivo visible.
+    if (categoriaFiltro.value.isNotEmpty &&
+        !categoriasDeLosGastos.contains(categoriaFiltro.value)) {
+      categoriaFiltro.value = '';
+    }
   }
 
   Future<void> cargarCategorias() async {
@@ -126,6 +148,7 @@ class GastosController extends GetxController {
     await _repository.vaciar();
     gastos.clear();
     categorias.clear();
+    categoriaFiltro.value = '';
     totalEnServidor.value = 0;
     desdeCache.value = false;
     mensajeError.value = '';

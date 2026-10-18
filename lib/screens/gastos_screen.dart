@@ -10,6 +10,7 @@ import '../services/api_exception.dart';
 import 'pantalla_con_fallo.dart';
 import '../widgets/empty_view.dart';
 import '../widgets/error_view.dart';
+import '../widgets/filtro_categorias.dart';
 import '../widgets/loading_view.dart';
 import '../widgets/sin_sesion_view.dart';
 import 'cambiar_password_screen.dart';
@@ -89,6 +90,9 @@ class GastosScreen extends GetView<GastosController> {
         if (controller.gastos.isEmpty) {
           return const EmptyView(mensaje: 'Aún no registras gastos en este viaje');
         }
+        // Los gastos que se ven dependen del chip elegido; el filtro es local,
+        // no se le vuelve a pedir nada al servidor.
+        final visibles = controller.gastosVisibles;
         return Column(
           children: [
             if (controller.desdeCache.value)
@@ -103,11 +107,23 @@ class GastosScreen extends GetView<GastosController> {
                   ),
                 ],
               ),
+            FiltroCategorias(
+              categorias: controller.categoriasDeLosGastos,
+              seleccionada: controller.categoriaFiltro.value,
+              alSeleccionar: controller.filtrarPor,
+            ),
             Expanded(
-              child: RefreshIndicator(
-                onRefresh: controller.cargarGastos,
-                child: _buildLista(context, controller.gastos),
-              ),
+              // Los chips siguen a la vista aunque el filtro no devuelva nada:
+              // es la única forma de volver a «Todas».
+              child: visibles.isEmpty
+                  ? EmptyView(
+                      mensaje:
+                          'No hay gastos en «${controller.categoriaFiltro.value}»',
+                    )
+                  : RefreshIndicator(
+                      onRefresh: controller.cargarGastos,
+                      child: _buildLista(context, visibles),
+                    ),
             ),
           ],
         );
